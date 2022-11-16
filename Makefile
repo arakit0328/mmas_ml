@@ -2,7 +2,7 @@ CC = c++
 CFLAGS = -Wall -g
 FLAGS = -Wall -g
 LIBS = -lm
-OBJS = SCP.o mmas_ml_main.o pheromone.o
+OBJS = SCPv.o mmas_ml_main.o pheromone.o
 
 
 mmas_ml: $(OBJS)
