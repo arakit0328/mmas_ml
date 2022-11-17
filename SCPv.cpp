@@ -37,13 +37,11 @@ SCPinstance::SCPinstance(FILE *SourceFile)
       Neighborhood.push_back(nn);
     }
 
-    
-
     // read costs
     for(int j = 0; j < C; j++)
     {
       fscanf(SourceFile, "%d", &cost);
-      Cost.push_back(cost);
+      Weight.push_back(cost);
     }
 
     // ファイルから各行の情報を読む
@@ -51,7 +49,6 @@ SCPinstance::SCPinstance(FILE *SourceFile)
     std::vector<int> cov;
 
 
-    
     for(int i = 0;  i < numRows; i++)
     {
       if (fscanf(SourceFile, "%d", &CoverNo) == EOF)
@@ -106,7 +103,7 @@ SCPinstance::SCPinstance(FILE *SourceFile)
       }
     }
   }
-  
+
   for (int j = 0; j < numColumns; ++j)
   {
     std::sort(Neighborhood[j].begin(), Neighborhood[j].end());
@@ -114,7 +111,9 @@ SCPinstance::SCPinstance(FILE *SourceFile)
   }
   // 近傍の生成終了
 
+  
 
+  
   // 簡単な方法でデータの正しさを確認
   long Sum1 = 0, Sum2 = 0;
   for (int i = 0; i < numRows; i++) Sum1 += RowCovers[i].size();
@@ -143,40 +142,23 @@ SCPinstance::SCPinstance(FILE *SourceFile)
 //
 
 // コンストラクタ
-SCPsolution::SCPsolution(const SCPinstance &pData, int k, int ts, double o_r)
+SCPsolution::SCPsolution(SCPinstance &instance, int k)
 {
-  //instance = pData;
+  //instance = instance;
 
-  nRow = pData.numRows;
-  nCol = pData.numColumns;
+  nRow = instance.numRows;
+  nCol = instance.numColumns;
   K = k;
   num_Cover = 0;
-  weight_threshold = ts;
-  oblivious_ratio = o_r;
-
-  for (int i = 0; i < k; i++) CS.push_back(nCol + 1);
-  // cs には最初は大きい値を詰めておく
-  for (int j = 0; j < k; j++)
-  {
-    CS[j] = nCol + 1;
-  }
-
+  
   for (int j = 0; j < nCol; ++j)
   {
     SOLUTION.push_back(0);
-    SCORE.push_back(0);
-    conf.push_back(1);
   }
 
   for (int i = 0; i < nRow; i++)
   {
     COVERED.push_back(0);
-    weight.push_back(1);
-  }
-
-  for (int j = 0; j < nCol; ++j)
-  {
-    SCORE[j] = pData.ColEntries[j].size(); // スコアの初期値
   }
 }
 
@@ -188,129 +170,93 @@ SCPsolution::~SCPsolution()
 
 
 // 候補解を初期化
-void SCPsolution::initialize(SCPinstance &pData)
+void SCPsolution::initialize(SCPinstance &instance)
 {
   num_Cover = 0;
 
   for (int j = 0; j < nCol; ++j)
   {
     SOLUTION[j] = 0;
-    SCORE[j] = pData.ColEntries[j].size(); // スコアの初期値
-    conf[j] = 1;
   }
 
   for (int i = 0; i < nRow; ++i)
   {
     COVERED[i] = 0;
-    weight[i] = 1;
   }
 
   // cs には最初は大きい値を詰めておく
-  for (int j = 0; j < K; j++)
-  {
-    CS[j] = nCol + 1;
-  }
+  CS.clear();
 }
+
+
 
 
 // CSに含まれない列から最大スコアのものを選んで返す
-int SCPsolution::get_column_maxscore(SCPinstance &pData, Rand& rnd)
-{
-  std::vector<int> maxCols;
-  int maxScore = 0, maxc = 0;
+// int SCPsolution::get_column_BMS(SCPinstance &instance, Rand& rnd)
+// {
+//   std::vector<int> maxCols;
+//   int maxScore = -instance.numColumns, maxc = 0;
 
-  for (int c = 0; c < pData.numColumns; c++)
-  {
-    if (SOLUTION[c]) { continue; }
+//   for (int c = 0; c < instance.numColumns; c++)
+//   {
+//     if (SOLUTION[c] == 0) { continue; }
+//     if (conf[c] == 0) { continue; }
 
-    // 最大スコアの列をチェック
-    if (maxScore < SCORE[c])
-    {
-      maxScore = SCORE[c];
-      maxCols.clear();
-      maxCols.push_back(c);
-    }
-    else if (maxScore == SCORE[c])
-      maxCols.push_back(c);
-  } // End for c
+//     // 最大スコアの列をチェック
+//     if (maxScore < SCORE[c])
+//     {
+//       maxScore = SCORE[c];
+//       maxCols.clear();
+//       maxCols.push_back(c);
+//     }
+//     else if (maxScore == SCORE[c])
+//       maxCols.push_back(c);
+//   } // End for c
 
-  if (maxCols.size() == 1) maxc = maxCols[0];
-  else
-  {
-    int j = rnd(0, maxCols.size() - 1);
-    maxc = maxCols[j];
-  }
+//   if (maxCols.size() == 1) maxc = maxCols[0];
+//   else
+//   {
+//     int j = rnd(0, maxCols.size() - 1);
+//     maxc = maxCols[j];
+//   }
 
-  return maxc;
-}
-
-
-// CSに含まれない列から最大スコアのものを選んで返す
-int SCPsolution::get_column_BMS(SCPinstance &pData, Rand& rnd)
-{
-  std::vector<int> maxCols;
-  int maxScore = -pData.numColumns, maxc = 0;
-
-  for (int c = 0; c < pData.numColumns; c++)
-  {
-    if (SOLUTION[c] == 0) { continue; }
-    if (conf[c] == 0) { continue; }
-
-    // 最大スコアの列をチェック
-    if (maxScore < SCORE[c])
-    {
-      maxScore = SCORE[c];
-      maxCols.clear();
-      maxCols.push_back(c);
-    }
-    else if (maxScore == SCORE[c])
-      maxCols.push_back(c);
-  } // End for c
-
-  if (maxCols.size() == 1) maxc = maxCols[0];
-  else
-  {
-    int j = rnd(0, maxCols.size() - 1);
-    maxc = maxCols[j];
-  }
-
-  return maxc;
-}
+//   return maxc;
+// }
 
 
 // CSに含まれない列から alpha * 最大スコア 以上のものを選んで返す
-int SCPsolution::get_column_grasp(SCPinstance &pData, double alpha, Rand& rnd)
-{
-  std::vector<int> Cols;
-  int maxScore = 0, minScore = pData.numRows;
+// int SCPsolution::get_column_grasp(SCPinstance &instance, double alpha, Rand& rnd)
+// {
+//   std::vector<int> Cols;
+//   int maxScore = 0, minScore = instance.numRows;
 
-  for (int c = 0; c < pData.numColumns; c++)
-  {
-    if (SOLUTION[c]) { continue; }
+//   for (int c = 0; c < instance.numColumns; c++)
+//   {
+//     if (SOLUTION[c]) { continue; }
 
-    // 最大スコアと最小スコアを確認
-    if (maxScore < SCORE[c]) maxScore = SCORE[c];
-    else if (minScore > SCORE[c]) minScore = SCORE[c];
-  } // End for c
+//     // 最大スコアと最小スコアを確認
+//     if (maxScore < SCORE[c]) maxScore = SCORE[c];
+//     else if (minScore > SCORE[c]) minScore = SCORE[c];
+//   } // End for c
 
-  for (int c = 0; c < pData.numColumns; c++)
-  {
-    if (SOLUTION[c]) { continue; }
+//   for (int c = 0; c < instance.numColumns; c++)
+//   {
+//     if (SOLUTION[c]) { continue; }
 
-    // スコアが大きいものをColsへ格納
-    if (SCORE[c] >= minScore + alpha * (maxScore - minScore))
-      Cols.push_back(c);
-  } // End for c
+//     // スコアが大きいものをColsへ格納
+//     if (SCORE[c] >= minScore + alpha * (maxScore - minScore))
+//       Cols.push_back(c);
+//   } // End for c
 
-  int j = rnd(0, Cols.size() - 1);
-  int col = Cols[j];
+//   int j = rnd(0, Cols.size() - 1);
+//   int col = Cols[j];
 
-  return col;
-}
+//   return col;
+// }
 
 
 // CSに列cを追加する
-void SCPsolution::add_column(SCPinstance &pData, int c, bool use_conf)
+void SCPsolution::add_column(SCPinstance &instance, int c)
 {
   if (SOLUTION[c])
   {
@@ -318,48 +264,22 @@ void SCPsolution::add_column(SCPinstance &pData, int c, bool use_conf)
     exit(1);
   }
 
-  SCORE[c] = -SCORE[c];
   SOLUTION[c] = 1;
 
-  // CSの中がソート済みになるように列cを追加
-  int j = 0;
-  while (c > CS[j]) j++;
-  for (int jj = K-1; jj > j; jj--) CS[jj] = CS[jj - 1];
-  CS[j] = c;
+  // CSに列cを追加
+  CS.push_back(c);
 
-  // スコア更新
-  for (int r : pData.ColEntries[c]) // 列cがカバーする行
-  {
+  for (int r : instance.ColEntries[c]) {
     COVERED[r]++;
-
-    // r行が初めてカバーされたら，rを含む行のスコアを減少
-    if (COVERED[r] == 1)
-    {
-      num_Cover++;        // カバーされる行の数が増える
-      for (int rc : pData.RowCovers[r])
-      {
-        if (rc != c) SCORE[rc]--;
-      } // End: for ri
-    } // End if covered[r] == 1
-
-    // r行が2回カバーされたら，rを含むCSの要素のスコアを増加
-    if (COVERED[r] == 2)
-    {
-      for (int rc : pData.RowCovers[r]) // r行をカバーする列
-      {
-        if (SOLUTION[rc])
-        {
-          SCORE[rc]++;
-          break;
-        }
-      }
-    } // End if covered[r] == 2
+    if (COVERED[r] == 1) {
+      num_Cover++;		// カバーされる行の数が増える
+    }
   }
 } // End add_column
 
 
 // CSから列cを削除する
-void SCPsolution::remove_column(SCPinstance &pData, int c)
+void SCPsolution::remove_column(SCPinstance &instance, int c)
 {
   if (SOLUTION[c] == 0)
   {
@@ -367,44 +287,16 @@ void SCPsolution::remove_column(SCPinstance &pData, int c)
     exit(1);
   }
 
-  SCORE[c] = -SCORE[c];
   SOLUTION[c] = 0;
 
-  // CSの中がソート済みになるように列cを削除
-  int j = 0;
-  while (c > CS[j]) j++;
-  for (int jj = j; jj < K; ++jj) CS[jj] = CS[jj + 1];
-  CS[K-1] = pData.numColumns + 1;
+  // 列cを削除
+  CS.erase(remove(CS.begin(), CS.end(), c), CS.end());
 
-  // スコア更新
-  for (int r : pData.ColEntries[c]) // 列cがカバーする行
-  {
+  for (int r : instance.ColEntries[c]) {
     COVERED[r]--;
-
-    // r行がカバーされなくなったら，rを含む行のスコアを増加
-    if (COVERED[r] == 0)
-    {
-      weight[r]++;                      // 行の重みをインクリメント
-      num_Cover--;        // カバーされる行の数が減る
-      SCORE[c]++;         // c列のスコアが増加
-      for (int rc : pData.RowCovers[r]) // r行をカバーする列
-      {
-        if (rc != c) SCORE[rc] += weight[r];
-      } // End: for ri
-    } // End if covered[r] == 0
-
-    // r行が1回カバーされるようになったら，rを含むCSの要素のスコアを減少
-    if (COVERED[r] == 1)
-    {
-      for (int rc : pData.RowCovers[r]) // r行をカバーする列
-      {
-        if (SOLUTION[rc])
-        {
-          SCORE[rc] -= weight[r];
-          break;
-        }
-      }
-    } // End if covered[r] == 1
+    if (COVERED[r] == 0) {
+      num_Cover--;        // カバーされる行の数が増える
+    }
   }
 } // End remove_column
 
@@ -412,9 +304,9 @@ void SCPsolution::remove_column(SCPinstance &pData, int c)
 // CSの中身を表示
 void SCPsolution::print_solution()
 {
-  for (int i = 0; i < K; ++i)
+  for (int c : CS)
   {
-    printf("%d ", CS[i] + 1);
+    printf("%d ", c + 1);
   }
   printf("\n");
 } // End print_solution
