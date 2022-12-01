@@ -48,7 +48,7 @@ public:
   int nRow;                     // 行数
   int nCol;                     // 列数
   int K;                        // num of columns
- 
+
   std::vector<int> CS;                   // CS: 候補解（列番号のリスト）
   std::vector<int> SOLUTION;             // SOLUTION[j] = 1: 列jが候補解に含まれる
   std::vector<int> COVERED;              // COVERED[i]: 行iがカバーされている回数
