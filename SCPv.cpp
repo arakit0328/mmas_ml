@@ -304,6 +304,7 @@ void SCPsolution::remove_column(SCPinstance &instance, int c)
 // CSの中身を表示
 void SCPsolution::print_solution()
 {
+  sort(CS.begin(), CS.end());
   for (int c : CS)
   {
     printf("%d ", c + 1);

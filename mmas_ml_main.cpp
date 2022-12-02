@@ -11,16 +11,33 @@
 using namespace std;
 
 
-// ObliviousLS で使う繰り返しの回数
-int numIteration = 5000;
+// 繰り返しの回数
+const int numIteration = 100;
 
-// row_weight の最大値
+
+/// Local Search
+// local search で使う繰り返しの回数
+const int ls_Iteration = 10000;
+
+// inactive_level の最大値
 const int Weight_Threshold = 1000;
 const double Oblivious_Ratio = 0.3;
+const int max_unimprove_step = 1000; // 局所探索でこの回数改善がなかったら終了する
 
 // BMS
-const double BMS_ratio = 0.66;
+const double BMS_ratio = 0.7;
+//const double BMS_ratio = 0.66;
 
+
+// Ants
+const int nAnts = 8;
+const int Beta = 2;
+const double rho = 0.95;
+
+// Pheromone
+const double pheromone_initial = 0.5;
+const double tau_max = 0.9;
+const double tau_min = 0.1;
 
 
 
@@ -37,6 +54,8 @@ void random_permutation(vector<int>& A, Rand& rnd)
 }
 
 
+
+/// For Local Search
 
 // BMS selection, the selected column is removed from CS
 int get_column_BMS(SCPinstance& instance,
@@ -237,7 +256,7 @@ void add_update_score(const SCPinstance& inst,
                       const SCPsolution& cs,
                       vector<int>& score,
                       vector<int>& subscore,
-                      vector<int>& row_weight)
+                      vector<int>& inactive_level)
 {
   // スコアを更新
   score[c] = -score[c];
@@ -253,7 +272,7 @@ void add_update_score(const SCPinstance& inst,
       {
         if (rc != c)
         {
-          score[rc] -= row_weight[r];
+          score[rc] -= inactive_level[r];
           subscore[rc]++;     // oneTotwo
         }
       } // End: for ri
@@ -266,7 +285,7 @@ void add_update_score(const SCPinstance& inst,
       {
         if (cs.SOLUTION[rc])
         {
-          score[rc] += row_weight[r];
+          score[rc] += inactive_level[r];
           subscore[rc]--;     // twoToone
         }
       }
@@ -281,7 +300,7 @@ void remove_update_score(const SCPinstance& inst,
                          const SCPsolution& cs,
                          vector<int>& score,
                          vector<int>& subscore,
-                         vector<int>& row_weight)
+                         vector<int>& inactive_level)
 {
   score[c] = -score[c];
   subscore[c] = -subscore[c];
@@ -294,7 +313,7 @@ void remove_update_score(const SCPinstance& inst,
     {
       for (int rc : inst.RowCovers[r]) // r行をカバーする列
       {
-          if (rc != c) score[rc] += row_weight[r];
+        if (rc != c) score[rc] += inactive_level[r];
       } // End: for ri
     } // End if covered[r] == 0
 
@@ -305,7 +324,7 @@ void remove_update_score(const SCPinstance& inst,
       {
         if (cs.SOLUTION[rc])
         {
-          score[rc] -= row_weight[r];
+          score[rc] -= inactive_level[r];
         }
         else
         {
@@ -314,17 +333,17 @@ void remove_update_score(const SCPinstance& inst,
       }
     } // End if covered[r] == 1
 
-          // r行が2回カバーされるようになったら，rを含むCSの要素のsubscoreを減少
-      if (cs.COVERED[r] == 2)
+    // r行が2回カバーされるようになったら，rを含むCSの要素のsubscoreを減少
+    if (cs.COVERED[r] == 2)
+    {
+      for (int rc : inst.RowCovers[r]) // r行をカバーする列
       {
-        for (int rc : inst.RowCovers[r]) // r行をカバーする列
+        if (cs.SOLUTION[rc])
         {
-          if (cs.SOLUTION[rc])
-          {
-            subscore[rc]--;        // twoToone
-          }
+          subscore[rc]--;        // twoToone
         }
-      } // End if covered[r] == 1
+      }
+    } // End if covered[r] == 1
   }
 }
 
@@ -365,23 +384,6 @@ int simple_column_maxscore(SCPinstance &inst,
 }
 
 
-// Select K columns at random.
-// 引数の cs に結果が入る
-SCPsolution random_construction(SCPinstance& inst,
-                                int k,
-                                Rand &rnd)
-{
-  SCPsolution cs(inst, k);
-  vector<int> cols(inst.numColumns);
-
-  for (int j = 0; j < inst.numColumns; ++j) cols[j] = j;
-  random_permutation(cols, rnd);
-  for (int k = 0; k < cs.K; k++) cs.add_column(inst, cols[k]);
-
-  return cs;
-}
-
-
 // conf = 1 for all neighbors of c
 void update_conf(SCPinstance& inst, int c, vector<int>& conf)
 {
@@ -400,7 +402,7 @@ SCPsolution DoubleLayerSelection(SCPinstance& inst,
 
   for (int c = 0; c < inst.numColumns; c++)
   {
-    score.push_back(inst.ColEntries[c].size());
+    score[c] = inst.ColEntries[c].size();
   }
 
   for (int i = 0; i < k; i++)
@@ -426,6 +428,7 @@ SCPsolution DoubleLayerSelection(SCPinstance& inst,
     if (maxCols.size() == 1) c = maxCols[0];
     else
     {
+      // 本当はここでpseudo independent row をチェックする
       int j = rnd() % maxCols.size();
       c = maxCols[j];
     }
@@ -460,7 +463,7 @@ SCPsolution ObliviousLS(SCPinstance& inst,
   // conf, score, subscore, weight はここで定義すればいい
   vector<int> score(inst.numColumns, 0);
   vector<int> subscore(inst.numColumns, 0);
-  vector<int> row_weight(inst.numRows, 1);
+  vector<int> inactive_level(inst.numRows, 1);
   vector<int> conf(inst.numColumns, 1);
   vector<int> time(inst.numColumns, 0);
 
@@ -492,13 +495,14 @@ SCPsolution ObliviousLS(SCPinstance& inst,
   CSw = CS;
   CSbest = CSw;
 
+  int unimprove_step = 0;
   for (int iter = 0; iter < niter; iter++)
   {
-    //cout << "Iter: " << iter << " ";
+    //cout << "iter: " << iter << " ";
     // 列を削除
     int c = get_column_BMS(inst, CSw, score, subscore, conf, time, bms_ratio, rnd);
     CSw.remove_column(inst, c);
-    remove_update_score(inst, c, CSw, score, subscore, row_weight);
+    remove_update_score(inst, c, CSw, score, subscore, inactive_level);
     // スコア更新終了
 
     time[c] = iter;
@@ -525,7 +529,7 @@ SCPsolution ObliviousLS(SCPinstance& inst,
 
     c = get_column_maxscore(inst, CSw, r_select, score, subscore, time, conf, rnd);
     CSw.add_column(inst, c);
-    add_update_score(inst, c, CSw, score, subscore, row_weight);
+    add_update_score(inst, c, CSw, score, subscore, inactive_level);
 
     time[c] = iter;
 
@@ -537,14 +541,14 @@ SCPsolution ObliviousLS(SCPinstance& inst,
 
     //cout << " add " << c << " ";
 
-    // row_weightとscoreの更新
+    // inactive_levelとscoreの更新
     bool flag_reduce = false;
     for (int i = 0; i < inst.numRows; i++)
     {
       if (CSw.COVERED[i] == 0)
       {
-        row_weight[i]++;
-        if (row_weight[i] > weight_threshold) flag_reduce = true;
+        inactive_level[i]++;
+        if (inactive_level[i] > weight_threshold) flag_reduce = true;
         for (int c : inst.RowCovers[i])
         {
           if (CSw.SOLUTION[c]) score[c]--;
@@ -557,8 +561,8 @@ SCPsolution ObliviousLS(SCPinstance& inst,
     {
       for (int i = 0; i < inst.numRows; i++)
       {
-        row_weight[i] = (int)(oblivious_ratio * (double)row_weight[i]);
-        if (row_weight[i] ==0) row_weight[i] = 1;
+        inactive_level[i] = (int)(oblivious_ratio * (double)inactive_level[i]);
+        if (inactive_level[i] ==0) inactive_level[i] = 1;
       }
       for (int j = 0; j < inst.numColumns; j++)
       {
@@ -569,9 +573,19 @@ SCPsolution ObliviousLS(SCPinstance& inst,
     if (CSbest.num_Cover < CSw.num_Cover)
     {
       CSbest = CSw;
+      unimprove_step = 0;
+    }
+    else
+    {
+      unimprove_step++;
     }
 
+    if (unimprove_step > max_unimprove_step) {
+      //cout << "large unimprove steps" << endl;
+      break;
+    }
     //cout << CSbest.num_Cover << " " << CSw.num_Cover << endl;
+    //cout << endl;
   } // end for iter
 
   return CSbest;
@@ -579,7 +593,7 @@ SCPsolution ObliviousLS(SCPinstance& inst,
 } // End ObliviousLS
 
 
-// Oblivious local search
+// Simple local search
 SCPsolution SimpleLS(SCPinstance& inst,
                      SCPsolution& CS,
                      double bms_ratio,
@@ -589,7 +603,7 @@ SCPsolution SimpleLS(SCPinstance& inst,
   // conf, score, subscore, weight はここで定義すればいい
   vector<int> score(inst.numColumns, 0);
   vector<int> subscore(inst.numColumns, 0);
-  vector<int> row_weight(inst.numRows, 1);
+  vector<int> inactive_level(inst.numRows, 1);
   vector<int> conf(inst.numColumns, 1);
   vector<int> time(inst.numColumns, 0);
 
@@ -623,11 +637,10 @@ SCPsolution SimpleLS(SCPinstance& inst,
 
   for (int iter = 0; iter < niter; iter++)
   {
-    //cout << "Iter: " << iter << " ";
     // 列を削除
     int c = get_column_BMS(inst, CSw, score, subscore, conf, time, bms_ratio, rnd);
     CSw.remove_column(inst, c);
-    remove_update_score(inst, c, CSw, score, subscore, row_weight);
+    remove_update_score(inst, c, CSw, score, subscore, inactive_level);
     // スコア更新終了
 
     time[c] = iter;
@@ -654,7 +667,7 @@ SCPsolution SimpleLS(SCPinstance& inst,
 
     c = get_column_maxscore(inst, CSw, r_select, score, subscore, time, conf, rnd);
     CSw.add_column(inst, c);
-    add_update_score(inst, c, CSw, score, subscore, row_weight);
+    add_update_score(inst, c, CSw, score, subscore, inactive_level);
 
     time[c] = iter;
 
@@ -684,20 +697,98 @@ SCPsolution SimpleLS(SCPinstance& inst,
 /////////////////////////////////////////////////////////////////////////
 
 // Ant
+void update_score(SCPinstance& inst,
+                  SCPsolution& cs,
+                  int c,
+                  vector<int>& score)
+{
+  // スコア更新
+  for (int r : inst.ColEntries[c]) // 列cがカバーする行
+  {
+    score[c] = -1;
+    // r行が初めてカバーされたら，rを含む列のスコアを減少
+    if (cs.COVERED[r] == 1)
+      for (int rc : inst.RowCovers[r])
+        if (rc != c) score[rc]--;
+  } // end スコア更新
+}
+
 
 SCPsolution AntConstruction(SCPinstance& inst,
                             SCPsolution& Best_CS,
-                            vector<double> tau,
-                            vector<double> eta,
-                            int type = 0)
+                            vector<double>& tau,
+                            //vector<double>& eta,
+                            //vector<double>& total_information,
+                            int type, // 0: 0%, 1: 0-50%, 2: 50-100%, 3: 100%
+                            int beta,
+                            Rand& rnd)
 {
+  if (type == 3) return Best_CS;
+
+  vector<int> score(inst.numColumns, 0);
+  for (int c = 0; c < inst.numColumns; c++) score[c] = inst.ColEntries[c].size();
+
   SCPsolution cs(inst, Best_CS.K);
 
+  // chi % の値をランダムに決める
+  int chi = 0;
+  if (type == 0) chi = 0;
+  else if (type == 1) chi = (rnd() % 50) + 1;
+  else if (type == 2) chi = (rnd() % 50) + 50;
+  else chi = 100;
 
+  // Best_CS の中からランダムにt = K * chi % 個選んでcsに入れる
+  vector<int> cstmp = Best_CS.CS;
+  random_permutation(cstmp, rnd);
+  int t = (cs.K * chi) / 100;
+  int c;
+  for (int i = 0; i < t; i++)
+  {
+    c = cstmp[i];
+    cs.add_column(inst, c);
+    update_score(inst, cs, c, score);
+  } // end cs
+
+  //cout << "End Ant Memory " << endl;
+
+  vector<pair<int,double> > probs;
+  // 残りの K - t 個をランダム選択
+  for (int i = 0; i < cs.K - t; i++)
+  {
+    probs.clear();
+    double p_sum = 0.0;
+    for (int c = 0; c < inst.numColumns; c++)
+    {
+      if (cs.SOLUTION[c] == 0)
+      {
+        p_sum += tau[c] * pow(score[c], beta);
+        probs.push_back(make_pair(c, p_sum));
+      }
+    }
+
+    //cout << "p_sum: " << p_sum << endl;
+
+    double prob_select = rnd.real() * p_sum;
+    //cout << "select: " << prob_select << endl;
+
+    int ci = 0;
+    double partial_sum = probs[ci].second;
+    while (partial_sum <= prob_select)
+    {
+      ci++;
+      partial_sum += probs[ci].second;
+    }
+    c = probs[ci].first;
+    // c の選択終了
+    //cout << "Add " << c << endl;
+
+    cs.add_column(inst, c);
+    // スコア更新
+    update_score(inst, cs, c, score);
+  }
 
   return cs;
 }
-
 
 
 /////////////////////////////////////////////////////////////////////////
@@ -706,20 +797,115 @@ SCPsolution AntConstruction(SCPinstance& inst,
 
 SCPsolution MMAS_ML(SCPinstance& inst,
                     int k,
+                    int beta,
+                    double rho,
+                    int numIteration, // 繰り返し回数
+                    int ls_Iteration, // local searchでの繰り返し回数
                     Rand& rnd)
 {
   SCPsolution cs_best(inst, k);
   SCPsolution cs = DoubleLayerSelection(inst, k, rnd);
-  cout << "End DoubleLayerSelection" << endl;
+  cout << "End DoubleLayerSelection " << cs.num_Cover << endl;
 
-  SCPsolution cs_0 = ObliviousLS(inst, cs, Weight_Threshold, Oblivious_Ratio, BMS_ratio, numIteration, rnd);
-  SCPsolution cs_1 = SimpleLS(inst, cs, BMS_ratio, numIteration, rnd);
+  SCPsolution cs_1 = ObliviousLS(inst, cs, Weight_Threshold, Oblivious_Ratio, BMS_ratio, ls_Iteration, rnd);
+  SCPsolution cs_2 = SimpleLS(inst, cs, BMS_ratio, ls_Iteration, rnd);
 
-  cout << "CS0 covers " << cs_0.num_Cover << endl;
-  cout << "CS1 covers " << cs_1.num_Cover << endl;
+  // フェロモン情報
+  vector<double> tau(inst.numColumns, pheromone_initial);
 
-  if (cs_0.num_Cover > cs_1.num_Cover) cs_best = cs_0;
-  else cs_best = cs_1;
+
+  // Ants use ObliviousLS
+  vector<SCPsolution> Ants1;
+  // Ants use SimpleLS
+  vector<SCPsolution> Ants2;
+
+
+  for (int type = 0; type <= 3; type++)
+  {
+    SCPsolution ac = AntConstruction(inst, cs_1, tau, type, beta, rnd);
+    Ants1.push_back(ac);
+    if (cs_best.num_Cover < ac.num_Cover) cs_best = ac;
+  }
+
+  for (int type = 0; type <= 3; type++)
+  {
+    SCPsolution ac = AntConstruction(inst, cs_2, tau, type, beta, rnd);
+    Ants2.push_back(ac);
+    if (cs_best.num_Cover < ac.num_Cover) cs_best = ac;
+  }
+
+  for (int type = 0; type <= 3; type++)
+  {
+    SCPsolution ac = ObliviousLS(inst, Ants1[type], Weight_Threshold, Oblivious_Ratio, BMS_ratio, numIteration, rnd);
+    Ants1[type] = ac;
+    if (cs_best.num_Cover < ac.num_Cover) cs_best = ac;
+  }
+
+  for (int type = 0; type <= 3; type++)
+  {
+    SCPsolution ac = SimpleLS(inst, Ants2[type], BMS_ratio, numIteration, rnd);
+    Ants2[type] = ac;
+    if (cs_best.num_Cover < ac.num_Cover) cs_best = ac;
+  }
+
+  cout << "Gererate 8 candidates that Covers " << cs_best.num_Cover << endl;
+  // Local Search
+
+
+  int iter = 0;
+  SCPsolution ac(inst, k);
+  SCPsolution local_best(inst, k);
+  while (iter < numIteration)
+  {
+    cout << "Iter: " << iter << " ";
+
+    // ObliviousLS
+    for (int type = 0; type <= 3; type++)
+    {
+      ac = AntConstruction(inst, cs_best, tau, type, beta, rnd);
+      ac = ObliviousLS(inst, ac, Weight_Threshold, Oblivious_Ratio, BMS_ratio, ls_Iteration, rnd);
+      Ants1[type] = ac;
+      if (type == 0) local_best = ac;
+      if (local_best.num_Cover < ac.num_Cover) local_best = ac;
+      if (cs_best.num_Cover < ac.num_Cover)
+      {
+        cs_best = ac;
+        //cout << " best " << "1" << type << " ";
+      }
+    }
+
+    // SimpleLS
+    for (int type = 0; type <= 3; type++)
+    {
+      ac = AntConstruction(inst, cs_best, tau, type, beta, rnd);
+      ac = SimpleLS(inst, ac, BMS_ratio, ls_Iteration, rnd);
+      Ants2[type] = ac;
+      if (local_best.num_Cover < ac.num_Cover) local_best = ac;
+      if (cs_best.num_Cover < ac.num_Cover)
+      {
+        cs_best = ac;
+        //cout << " best " << "2" << type << " ";
+      }
+    }
+
+    // pheromone update
+    // cs_best に含まれる列のフェロモンが増加する
+    for (int c = 0; c < inst.numColumns; c++)
+    {
+      if (cs_best.SOLUTION[c])
+        tau[c] = rho * tau[c] + (1 - rho);
+      else
+        tau[c] = rho * tau[c];
+
+      if (tau[c] < tau_min) tau[c] = tau_min;
+      else if (tau[c] > tau_max) tau[c] = tau_max;
+    }
+
+    iter++;
+
+    cout << local_best.num_Cover << "," << cs_best.num_Cover << " ";
+    cout << endl;
+  }
 
   return cs_best;
 }
@@ -739,24 +925,23 @@ int main(int argc, char** argv)
   FILE *SourceFile = fopen(FileName,"r");
   int K = atoi(argv[2]);
 
+
   // SCPのインスタンスを読み込む
   SCPinstance  instance(SourceFile);
 
   // initialize
   SCPsolution CS(instance, K);
-  SCPsolution CSimp(instance, K);
   // End Initialize;
 
-  int seed = 0;
   Rand rnd;
-  rnd.seed(seed);
+  //int seed = 1;
+  //rnd.seed(seed);
 
-  CSimp = MMAS_ML(instance, K, rnd);
+  CS = MMAS_ML(instance, K, Beta, rho, numIteration, ls_Iteration, rnd);
 
   // 結果
-  printf("Covers %d rows.\n", CSimp.num_Cover);
-
-
+  printf("Covers %d rows.\n", CS.num_Cover);
+  CS.print_solution();
 
   return 0;
 }

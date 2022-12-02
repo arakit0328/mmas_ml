@@ -1,6 +1,6 @@
 CC = c++
-CFLAGS = -Wall -g
-FLAGS = -Wall -g
+CFLAGS = -Wall
+FLAGS = -Wall -O2
 LIBS = -lm
 OBJS = SCPv.o mmas_ml_main.o
 

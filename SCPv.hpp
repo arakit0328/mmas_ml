@@ -62,15 +62,6 @@ public:
   // 候補解を初期化
   void initialize(SCPinstance& instance);
 
-  // CSに含まれない列から最大スコアのものを選んで返す
-  //int get_column_maxscore(SCPinstance &instance, Rand& rnd);
-
-  // CSに含まれない列から最大スコアのものを選んで返す
-  //int get_column_BMS(SCPinstance &instance, Rand& rnd);
-
-  // CSに含まれない列から alpha * 最大スコア 以上のものを選んで返す
-  //int get_column_grasp(SCPinstance &instance, double alpha, Rand& rnd);
-
   // CSに列cを追加する
   void add_column(SCPinstance &instance, int c);
 
