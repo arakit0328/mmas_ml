@@ -26,13 +26,13 @@ const int max_unimprove_step = 1000; // 局所探索でこの回数改善がな�
 
 // BMS
 const double BMS_ratio = 0.7;
-//const double BMS_ratio = 0.66;
 
 
 // Ants
-const int nAnts = 8;
+//const int nAnts = 8;
 const int Beta = 2;
 const double rho = 0.95;
+
 
 // Pheromone
 const double pheromone_initial = 0.5;
@@ -429,6 +429,7 @@ SCPsolution DoubleLayerSelection(SCPinstance& inst,
     else
     {
       // 本当はここでpseudo independent row をチェックする
+      // とりあえずランダムにしておく
       int j = rnd() % maxCols.size();
       c = maxCols[j];
     }
@@ -438,11 +439,8 @@ SCPsolution DoubleLayerSelection(SCPinstance& inst,
 
     // スコアを更新
     for (int r : inst.ColEntries[c]) // 列cがカバーする行
-    {
       if (cs.COVERED[r] == 1)
-        for (int rc : inst.RowCovers[r])
-          if (rc != c) score[rc]--;
-    } // End if covered[r] == 1
+        for (int rc : inst.RowCovers[r]) score[rc]--;
   }
 
   return cs;
